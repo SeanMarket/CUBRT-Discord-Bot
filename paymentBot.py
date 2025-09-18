@@ -152,31 +152,4 @@ async def verifyRoles(ctx):
 
 
     print("Counter: " + counter)
-        
-
-
-@bot.command()
-async def hello(ctx):
-    await ctx.send(f"Hello {ctx.author.mention}!")
-
-@bot.command()
-async def jake(ctx): 
-    await ctx.send(f"Fuck you")
-
-@bot.command()     
-async def verifyHoles(ctx):
-    await ctx.send(f"Jake verified")
-
-@bot.command()
-async def freakybob(ctx):
-    await ctx.send(f"Jake is a freakybob")
-
-@bot.command()
-async def carson(ctx):
-    await ctx.send(f"CARSON???")
-
-@bot.command()
-async def sean(ctx):
-    await ctx.send(f"Stinky CS major")
-
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
