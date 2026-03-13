@@ -34,9 +34,9 @@ bot = commands.Bot(command_prefix='$', intents=intents)
 
 
 
-
+#-----------Payment-----------#
 def pullSheet():
-    sheet_id = "1P9k89U1hkDVZM9Y-OSiMETQM-WY3La-bae6zBPjC5ho" #Refresh the sheet every time there is a new reaction
+    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction
     print(sheet_id)
     sheet = sheetsClient.open_by_key(sheet_id)
     print("Successfully opened the sheet")
@@ -86,25 +86,8 @@ async def on_raw_reaction_add(payload):
             print(person)
             if person == member.name.lower():
                 await member.add_roles(role) #horrible time complexity, but I don't feel like creating a data structure
-                counter = counter + 1
-
-
-
-    #WIP for just checking sheet and checking server, removing the need to react to the message.
-    # for user in guild.members:
-    #     for sheetMember in memberList:
-    #         if(user == sheetMember):
-    #             addRole = guild.
-
-
-        print("Counter: " + counter)
     else:
         return
-    
-    
-
-
-
 
 @bot.command()
 async def verifyRoles(ctx):
@@ -138,8 +121,6 @@ async def verifyRoles(ctx):
 
     role = discord.utils.get(ctx.guild.roles, name=mechanicRole)
     memberList = pullSheet()
-
-    counter = 0
   
     for member in memberList: #memberList is a list of lowercase names
         for person in members: #members is a list of member objects
