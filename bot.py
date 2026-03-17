@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import logging
+import asyncio
 from dotenv import load_dotenv
 import os
 import gspread
@@ -32,11 +33,9 @@ intents.presences = True
 bot = commands.Bot(command_prefix='$', intents=intents) 
 
 
-
-
 #-----------Payment-----------#
 def pullSheet():
-    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction
+    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction. Does not need to be initialized on startup because all values get declared prior to use.
     print(sheet_id)
     sheet = sheetsClient.open_by_key(sheet_id)
     print("Successfully opened the sheet")
@@ -73,8 +72,6 @@ async def on_raw_reaction_add(payload):
     # memberName = (member.name).lower convert to lowercase to avoid capitalization errors
 
     print(member.name + ':')
-
-    
 
     payloadMID = str(payload.message_id)
 
@@ -128,58 +125,195 @@ async def verifyRoles(ctx):
             if person.name.lower() == member:
                 await person.add_roles(role) #horrible time complexity, but I don't feel like creating a data structure
 
+
 #-----------Driver Sheet-----------#
 
-
-
-@dataclass
+@dataclass(frozen=True)
 class Person:
     name: str
     rowNum: int
 
+
 drivers = {}
-global row #Start at 2 because row 1 is headers
-row = int(2)
-def pullDriverSheet():
-    sheet_id = os.getenv('DRIVER_SHEET')
+row = int(2) #init to 2 because first row is headers
+worksheet = None
+
+
+def pullDriverSheet() -> None:
+    global worksheet
+    global row
+
+    sheet_id = os.getenv('DRIVER_SHEET') #Include all this boiler plate again so the bot can see changes made to the sheet while running
     print(sheet_id)
-    sheet = sheetsClient.open_by_key(sheet_id)
+    driverSheet = sheetsClient.open_by_key(sheet_id)
+    worksheet = driverSheet.get_worksheet(0)
     print("Successfully opened driver sheet")
-    driver_list = sheet.sheet1.col_values(1)
+
+    driver_list = driverSheet.sheet1.col_values(1)
     driver_list.remove("Driver") #first element in column A is always driver
 
-    global row
     for person in driver_list: #hash each driver's name and use the hash key as key and driver name as value
         driver = Person(str(person), row)
+
+        if drivers.get(hash(person)): #check to see if driver is already in dictionary
+            continue
+        
         drivers.update({hash(person):driver})
-        row += 1
+        row += 1 #sets row to next free row
 
     print("Successfully obtained drivers")
-    return drivers
 
+
+
+# @bot.command() #Debugging function
+# async def displayDrivers(ctx):
+#     await ctx.send(drivers)
 
 
 @bot.command()
-async def displayDrivers(ctx):
-    drivers = pullDriverSheet()
-    await ctx.send(drivers)
+async def addDriver(ctx, first:str, last:str) -> None:
+    global row
 
-
-@bot.command()
-async def addDriver(ctx, first, last):
     name = str(first) +' ' + str(last)
 
     if not drivers.get(hash(name)):
-        await ctx.send("Adding: " + str(name) + " to the driver list")
-        row +=1
+        print("Adding: " + name + " to the driver list")
+        row += 1
         drivers.update({hash(name):Person(name, row)})
         return
     
-    await ctx.send("Driver " + str(name) + " already in sheet")
+    print("Driver " + name + " already in sheet")
+
+
+def findDriverRow(first:str, last:str) -> int:
+    name = str(first) +' ' + str(last)
+    driver = drivers.get(hash(name))
+    driverRow = driver.rowNum
+    return driverRow
+    
+
+async def getMessage(ctx) -> str:
+
+    def check(message):
+        return message.author == ctx.author and message.channel == ctx.channel
+    
+    user_reply = await bot.wait_for("message", check=check)
+
+    value = user_reply.content.strip()
+
+    return value
+
+def isEmpty(row, col) -> bool:
+    val = worksheet.cell(row,col).value
+
+    if val == None:
+        return True
+    else:
+        return False
+    
+def getEmptyCell(row) -> int:
+    i = 1
+    while worksheet.cell(row, i).value != None:
+        i += 1
+    return i
+    
+
+MANUALCOL = int(2)
+EXPERIENCECOL = int(3)
+HEADERROW = int(1)
+
+def parseLapTime(lapTime: str) -> float:
+    minutesPart, secondsPart = lapTime.split(":")
+    minutes = int(minutesPart)
+    seconds = float(secondsPart)
+    return minutes * 60 + seconds
+
+def formatLapTime(totalSeconds: float) -> str:
+    minutes = int(totalSeconds // 60)
+    seconds = totalSeconds % 60
+    return f"{minutes:02}:{seconds:05.2f}"
+
+def averageLapTimes(lapTimes: list[str]) -> str:
+    total = sum(parseLapTime(time) for time in lapTimes)
+    average = total / len(lapTimes)
+    return formatLapTime(average)
+
+@bot.command()
+async def addData(ctx, first, last):
+    pullDriverSheet()
+    await addDriver(ctx, first, last)
+    driverRow = findDriverRow(first, last)
+    
+
+    if isEmpty(driverRow, MANUALCOL):
+        await ctx.send(f"Can they heel-toe?")
+        value = await getMessage(ctx)
+        worksheet.update_cell(driverRow, MANUALCOL, value)
+        print(first +' '+ last + " manual set to: " + str(value))
+    
+    if isEmpty(driverRow, EXPERIENCECOL):
+        await ctx.send(f"List any prior driving experience (not CUBRT-related)")
+        value = await getMessage(ctx)
+        worksheet.update_cell(driverRow, EXPERIENCECOL, value)
+        print(first +' '+ last + " Experience: " + str(value))
+
+    emptyCol = getEmptyCell(driverRow) #Empty cell is the next empty cell in the driver row. Populating sheet from left to right
+
+    await ctx.send("Enter event name")
+    eventName = await getMessage(ctx)
+    
+    if(worksheet.cell(row,emptyCol).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol, "Event")
+
+    worksheet.update_cell(driverRow, emptyCol, eventName)
+
+    await ctx.send("Enter fastest lap (MM:SS.XX). If not applicable, type N/A")
+    fastLap = await getMessage(ctx)
+
+    if(worksheet.cell(row,emptyCol+1).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol+1, "Fast lap")
+
+    worksheet.update_cell(driverRow, emptyCol + 1, fastLap)
+
+    await ctx.send("Enter number of timed laps. If not applicable, type N/A")
+    numLaps = await getMessage(ctx)
+
+    if(worksheet.cell(row,emptyCol+2).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
+
+    if numLaps == "N/A":
+        worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
+    else:
+        i = 1
+        times = []
+        while(i <= int(numLaps)):
+            await ctx.send("Enter time for lap " + str(i) + " (MM:SS.XX)")
+            lapTime = await getMessage(ctx)
+
+            temp = lapTime.split(":") #split returns list of separated pieces
+            while(len(temp != 2)):
+                await ctx.send("Make sure format is in MM:SS.XX")
+                lapTime = await getMessage(ctx)
+                temp = lapTime.split(":")
+
+            times.append(lapTime)
+            i +=1
+
+        average = averageLapTimes(times)
+
+        worksheet.update_cell(driverRow, emptyCol + 2, average)
+
+    await ctx.send("Enter notes")
+
+
+    notes = await getMessage(ctx)
+
+    if(worksheet.cell(row,emptyCol+3).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol + 3, "Notes")
+    
+    worksheet.update_cell(driverRow, emptyCol + 3, notes)
+    
             
-
-
-
 #-----------Personal Commands-----------#
 @bot.command()
 async def hello(ctx):
@@ -208,10 +342,6 @@ async def sean(ctx):
 @bot.command()
 async def tripp(ctx):
     await ctx.send(f"Last seen at shop: 1000000 Days Ago")
-
-@bot.command()
-async def retard(ctx):
-    await ctx.send(f"Where's Jake at")
 
 @bot.command()
 async def mike(ctx):
