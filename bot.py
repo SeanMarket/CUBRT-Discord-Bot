@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import logging
-import asyncio
 from dotenv import load_dotenv
 import os
 import gspread
@@ -34,12 +33,14 @@ bot = commands.Bot(command_prefix='$', intents=intents)
 
 
 #-----------Payment-----------#
+MEMBERCOL = 3
+
 def pullSheet():
-    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction. Does not need to be initialized on startup because all values get declared prior to use.
+    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction
     print(sheet_id)
     sheet = sheetsClient.open_by_key(sheet_id)
     print("Successfully opened the sheet")
-    values_list = sheet.sheet1.col_values(3)
+    values_list = sheet.sheet1.col_values(MEMBERCOL)
 
 
     lowerList = []
@@ -178,8 +179,9 @@ async def addDriver(ctx, first:str, last:str) -> None:
 
     if not drivers.get(hash(name)):
         print("Adding: " + name + " to the driver list")
-        row += 1
         drivers.update({hash(name):Person(name, row)})
+        worksheet.update_cell(row, NAMECOL, first + ' ' + last)
+        row += 1
         return
     
     print("Driver " + name + " already in sheet")
@@ -218,10 +220,6 @@ def getEmptyCell(row) -> int:
     return i
     
 
-MANUALCOL = int(2)
-EXPERIENCECOL = int(3)
-HEADERROW = int(1)
-
 def parseLapTime(lapTime: str) -> float:
     minutesPart, secondsPart = lapTime.split(":")
     minutes = int(minutesPart)
@@ -238,11 +236,39 @@ def averageLapTimes(lapTimes: list[str]) -> str:
     average = total / len(lapTimes)
     return formatLapTime(average)
 
+
+eventName = None
+
+@bot.command()
+async def createEvent(ctx):
+    global eventName
+    await ctx.send(f"Enter event name: ")
+    eventName = await getMessage(ctx)
+    await ctx.send(f"Setting event to " + eventName)
+
+skipTime = False
+@bot.command() #this function is useful when entering bulk driver data. Otherwise just put N/A when prompted
+async def skipTimed(ctx):
+    global skipTime
+    skipTime = True
+    await ctx.send(f"Skipping timed laps")
+
+NAMECOL  = int(1)
+MANUALCOL = int(2)
+EXPERIENCECOL = int(3)
+HEADERROW = int(1)
+
 @bot.command()
 async def addData(ctx, first, last):
+    global eventName
+    global skipTime
+
     pullDriverSheet()
     await addDriver(ctx, first, last)
     driverRow = findDriverRow(first, last)
+
+    if worksheet.cell(driverRow, NAMECOL) == None:
+        worksheet.update_cell(driverRow, NAMECOL, first + ' ' + last)
     
 
     if isEmpty(driverRow, MANUALCOL):
@@ -259,8 +285,9 @@ async def addData(ctx, first, last):
 
     emptyCol = getEmptyCell(driverRow) #Empty cell is the next empty cell in the driver row. Populating sheet from left to right
 
-    await ctx.send("Enter event name")
-    eventName = await getMessage(ctx)
+    if eventName == None:
+        await ctx.send("Enter event name")
+        eventName = await getMessage(ctx)
     
     if(worksheet.cell(row,emptyCol).value == None):
         worksheet.update_cell(HEADERROW, emptyCol, "Event")
@@ -275,33 +302,37 @@ async def addData(ctx, first, last):
 
     worksheet.update_cell(driverRow, emptyCol + 1, fastLap)
 
-    await ctx.send("Enter number of timed laps. If not applicable, type N/A")
-    numLaps = await getMessage(ctx)
 
-    if(worksheet.cell(row,emptyCol+2).value == None):
-        worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
-
-    if numLaps == "N/A":
+    if skipTime:
         worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
-    else:
-        i = 1
-        times = []
-        while(i <= int(numLaps)):
-            await ctx.send("Enter time for lap " + str(i) + " (MM:SS.XX)")
-            lapTime = await getMessage(ctx)
+    else: 
+        await ctx.send("Enter number of timed laps. If not applicable, type N/A")
+        numLaps = await getMessage(ctx)
 
-            temp = lapTime.split(":") #split returns list of separated pieces
-            while(len(temp != 2)):
-                await ctx.send("Make sure format is in MM:SS.XX")
+        if(worksheet.cell(row,emptyCol+2).value == None):
+            worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
+
+        if numLaps == "N/A":
+            worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
+        else:
+            i = 1
+            times = []
+            while(i <= int(numLaps)):
+                await ctx.send("Enter time for lap " + str(i) + " (MM:SS.XX)")
                 lapTime = await getMessage(ctx)
-                temp = lapTime.split(":")
 
-            times.append(lapTime)
-            i +=1
+                temp = lapTime.split(":") #split returns list of separated pieces
+                while(len(temp != 2)):
+                    await ctx.send("Make sure format is in MM:SS.XX")
+                    lapTime = await getMessage(ctx)
+                    temp = lapTime.split(":")
 
-        average = averageLapTimes(times)
+                times.append(lapTime)
+                i +=1
 
-        worksheet.update_cell(driverRow, emptyCol + 2, average)
+            average = averageLapTimes(times)
+
+            worksheet.update_cell(driverRow, emptyCol + 2, average)
 
     await ctx.send("Enter notes")
 
@@ -312,6 +343,40 @@ async def addData(ctx, first, last):
         worksheet.update_cell(HEADERROW, emptyCol + 3, "Notes")
     
     worksheet.update_cell(driverRow, emptyCol + 3, notes)
+
+@bot.command()
+async def addNotes(ctx, first, last):
+    global eventName
+    pullDriverSheet()
+    await addDriver(ctx, first, last)
+
+    driverRow = findDriverRow(first, last)
+
+    if worksheet.cell(driverRow, NAMECOL) == None:
+        worksheet.update_cell(driverRow, NAMECOL, first + ' ' + last)
+
+    emptyCol = getEmptyCell(driverRow)
+
+    if eventName == None:
+        await ctx.send("Enter event name")
+        eventName = await getMessage(ctx)
+    
+    if(worksheet.cell(row,emptyCol).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol, "Event")
+
+    worksheet.update_cell(driverRow, emptyCol, eventName)
+
+
+    await ctx.send("Enter notes")
+
+
+    notes = await getMessage(ctx)
+
+    if(worksheet.cell(row,emptyCol+1).value == None):
+        worksheet.update_cell(HEADERROW, emptyCol + 1, "Notes")
+    
+    worksheet.update_cell(driverRow, emptyCol + 1, notes)
+
     
             
 #-----------Personal Commands-----------#
