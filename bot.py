@@ -259,7 +259,7 @@ EXPERIENCECOL = int(3)
 HEADERROW = int(1)
 
 @bot.command()
-async def addData(ctx, first, last):
+async def addData(ctx, first:str, last:str)->None:
     global eventName
     global skipTime
 
@@ -302,6 +302,8 @@ async def addData(ctx, first, last):
 
     worksheet.update_cell(driverRow, emptyCol + 1, fastLap)
 
+    if(worksheet.cell(row,emptyCol+2).value == None):
+            worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
 
     if skipTime:
         worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
@@ -309,20 +311,18 @@ async def addData(ctx, first, last):
         await ctx.send("Enter number of timed laps. If not applicable, type N/A")
         numLaps = await getMessage(ctx)
 
-        if(worksheet.cell(row,emptyCol+2).value == None):
-            worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
-
         if numLaps == "N/A":
             worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
         else:
             i = 1
             times = []
+            temp = []
             while(i <= int(numLaps)):
                 await ctx.send("Enter time for lap " + str(i) + " (MM:SS.XX)")
                 lapTime = await getMessage(ctx)
 
                 temp = lapTime.split(":") #split returns list of separated pieces
-                while(len(temp != 2)):
+                while(len(temp) != 2):
                     await ctx.send("Make sure format is in MM:SS.XX")
                     lapTime = await getMessage(ctx)
                     temp = lapTime.split(":")
@@ -344,8 +344,10 @@ async def addData(ctx, first, last):
     
     worksheet.update_cell(driverRow, emptyCol + 3, notes)
 
+
+
 @bot.command()
-async def addNotes(ctx, first, last):
+async def addNotes(ctx, first:str, last:str)->None:
     global eventName
     pullDriverSheet()
     await addDriver(ctx, first, last)
@@ -367,6 +369,17 @@ async def addNotes(ctx, first, last):
     worksheet.update_cell(driverRow, emptyCol, eventName)
 
 
+    if(worksheet.cell(row,emptyCol+1).value == None): #fill in fast lap and avg lap columns to maintain formatting. When using this function, only event name and notes are requested.
+        worksheet.update_cell(HEADERROW, emptyCol+1, "Fast lap")
+
+    worksheet.update_cell(driverRow, emptyCol + 1, "N/A")
+
+    if(worksheet.cell(row,emptyCol+2).value == None):
+            worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
+
+    worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
+
+
     await ctx.send("Enter notes")
 
 
@@ -378,7 +391,7 @@ async def addNotes(ctx, first, last):
     worksheet.update_cell(driverRow, emptyCol + 1, notes)
 
     
-            
+   
 #-----------Personal Commands-----------#
 @bot.command()
 async def hello(ctx):
