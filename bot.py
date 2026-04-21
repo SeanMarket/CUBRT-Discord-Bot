@@ -136,15 +136,15 @@ class Person:
 
 
 drivers = {}
-row = int(2) #init to 2 because first row is headers
+row = int(2) #init to 2 because first row is headers. Is equal to next free row
 worksheet = None
 
 
-def pullDriverSheet() -> None:
+def pullDriverSheet() -> None:#Call this with every sheet update so the bot can see changes while running
     global worksheet
     global row
 
-    sheet_id = os.getenv('DRIVER_SHEET') #Include all this boiler plate again so the bot can see changes made to the sheet while running
+    sheet_id = os.getenv('DRIVER_SHEET') 
     print(sheet_id)
     driverSheet = sheetsClient.open_by_key(sheet_id)
     worksheet = driverSheet.get_worksheet(0)
@@ -154,6 +154,7 @@ def pullDriverSheet() -> None:
     driver_list.remove("Driver") #first element in column A is always driver
 
     for person in driver_list: #hash each driver's name and use the hash key as key and driver name as value
+        #TODO make this not run every time pullDriverSheet is called
         driver = Person(str(person), row)
 
         if drivers.get(hash(person)): #check to see if driver is already in dictionary
@@ -201,11 +202,11 @@ async def getMessage(ctx) -> str:
     
     user_reply = await bot.wait_for("message", check=check)
 
-    value = user_reply.content.strip()
+    value = user_reply.content.strip() #strip method removes leading and trailing whitespace
 
     return value
 
-def isEmpty(row, col) -> bool:
+def isEmpty(row:int, col:int) -> bool:
     val = worksheet.cell(row,col).value
 
     if val == None:
@@ -213,7 +214,7 @@ def isEmpty(row, col) -> bool:
     else:
         return False
     
-def getEmptyCell(row) -> int:
+def getEmptyCell(row:int) -> int: #finds next empty row
     i = 1
     while worksheet.cell(row, i).value != None:
         i += 1
@@ -221,12 +222,12 @@ def getEmptyCell(row) -> int:
     
 
 def parseLapTime(lapTime: str) -> float:
-    minutesPart, secondsPart = lapTime.split(":")
+    minutesPart, secondsPart = lapTime.split(":") #split laptimes to allow for easier calculation. 01:23.42 -> minutesPart = 1, secondsPart = 23.42
     minutes = int(minutesPart)
     seconds = float(secondsPart)
     return minutes * 60 + seconds
 
-def formatLapTime(totalSeconds: float) -> str:
+def formatLapTime(totalSeconds: float) -> str: #takes the total seconds from parseLapTime and formats it back into mm:ss.xx
     minutes = int(totalSeconds // 60)
     seconds = totalSeconds % 60
     return f"{minutes:02}:{seconds:05.2f}"
@@ -247,7 +248,7 @@ async def createEvent(ctx):
     await ctx.send(f"Setting event to " + eventName)
 
 skipTime = False
-@bot.command() #this function is useful when entering bulk driver data. Otherwise just put N/A when prompted
+@bot.command() #this function is useful when entering bulk driver data without knowing the number of timed laps and/or times. Otherwise just put N/A when prompted
 async def skipTimed(ctx):
     global skipTime
     skipTime = True
@@ -264,20 +265,20 @@ async def addData(ctx, first:str, last:str)->None:
     global skipTime
 
     pullDriverSheet()
-    await addDriver(ctx, first, last)
+    await addDriver(ctx, first, last) #Check if driver is already in sheet or not, and find the driver
     driverRow = findDriverRow(first, last)
 
     if worksheet.cell(driverRow, NAMECOL) == None:
         worksheet.update_cell(driverRow, NAMECOL, first + ' ' + last)
     
 
-    if isEmpty(driverRow, MANUALCOL):
+    if isEmpty(driverRow, MANUALCOL): #add manual driving experience if not already in sheet
         await ctx.send(f"Can they heel-toe?")
         value = await getMessage(ctx)
         worksheet.update_cell(driverRow, MANUALCOL, value)
         print(first +' '+ last + " manual set to: " + str(value))
     
-    if isEmpty(driverRow, EXPERIENCECOL):
+    if isEmpty(driverRow, EXPERIENCECOL): #add prior racing experience if not already in sheet
         await ctx.send(f"List any prior driving experience (not CUBRT-related)")
         value = await getMessage(ctx)
         worksheet.update_cell(driverRow, EXPERIENCECOL, value)
@@ -289,7 +290,7 @@ async def addData(ctx, first:str, last:str)->None:
         await ctx.send("Enter event name")
         eventName = await getMessage(ctx)
     
-    if(worksheet.cell(row,emptyCol).value == None):
+    if(worksheet.cell(row,emptyCol).value == None): #add event column header if needed
         worksheet.update_cell(HEADERROW, emptyCol, "Event")
 
     worksheet.update_cell(driverRow, emptyCol, eventName)
@@ -297,12 +298,12 @@ async def addData(ctx, first:str, last:str)->None:
     await ctx.send("Enter fastest lap (MM:SS.XX). If not applicable, type N/A")
     fastLap = await getMessage(ctx)
 
-    if(worksheet.cell(row,emptyCol+1).value == None):
+    if(worksheet.cell(row,emptyCol+1).value == None): #add fast lap column header if needed
         worksheet.update_cell(HEADERROW, emptyCol+1, "Fast lap")
 
     worksheet.update_cell(driverRow, emptyCol + 1, fastLap)
 
-    if(worksheet.cell(row,emptyCol+2).value == None):
+    if(worksheet.cell(row,emptyCol+2).value == None): #add average lap column header if needed
             worksheet.update_cell(HEADERROW, emptyCol+2, "Avg Lap")
 
     if skipTime:
@@ -313,7 +314,8 @@ async def addData(ctx, first:str, last:str)->None:
 
         if numLaps == "N/A":
             worksheet.update_cell(driverRow, emptyCol + 2, "N/A")
-        else:
+        else: #Input the number of timed laps and calculate the average
+            #TODO Add this logic to averageLapTimes function
             i = 1
             times = []
             temp = []
@@ -347,8 +349,10 @@ async def addData(ctx, first:str, last:str)->None:
 
 
 @bot.command()
-async def addNotes(ctx, first:str, last:str)->None:
+async def addNotes(ctx, first:str, last:str)->None: #bypass all timing information (both fast lap and avg lap). Useful when we are not timing laps but are still taking notes
     global eventName
+
+
     pullDriverSheet()
     await addDriver(ctx, first, last)
 
@@ -363,6 +367,8 @@ async def addNotes(ctx, first:str, last:str)->None:
         await ctx.send("Enter event name")
         eventName = await getMessage(ctx)
     
+
+    #TODO Add these next couple of checks to a stand-alone function
     if(worksheet.cell(row,emptyCol).value == None):
         worksheet.update_cell(HEADERROW, emptyCol, "Event")
 
@@ -431,11 +437,27 @@ async def austin(ctx):
 
 @bot.command()
 async def dom(ctx):
-    await ctx.send(f"That's too much money")
+    await ctx.send(f"That's too much money, but can we sell 720 and buy xyz")
 
 @bot.command()
 async def chazbo(ctx):
     await ctx.send(f"📷")
+
+@bot.command()
+async def tobias(ctx):
+    await ctx.send(f"AKA Tovomus, Toberculosis, Tobungaloe, Toenail, Tobiggest Tolargest, etc.")
+
+@bot.command()
+async def kai(ctx):
+    await ctx.send(f"Probably taking pictures of a Lambo or something")
+
+@bot.command()
+async def liam(ctx):
+    await ctx.send(f"719 maxxing")
+
+@bot.command()
+async def tanner(ctx):
+    await ctx.send(f"majoring and minoring in everything")
 
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
