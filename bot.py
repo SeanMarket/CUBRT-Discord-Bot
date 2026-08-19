@@ -33,10 +33,12 @@ bot = commands.Bot(command_prefix='$', intents=intents)
 
 
 #-----------Payment-----------#
-MEMBERCOL = 3
+MEMBERCOL = 5
 
-def pullSheet():
-    sheet_id = os.getenv('PAYMENT_SHEET') #Refresh the sheet every time there is a new reaction
+def pullSheet():#Refresh the sheet every time there is a new reaction
+    #TODO Overhaul logic to use hashmap instead of nested for loops
+    #TODO Make sheet not dependent on reacting to a message
+    sheet_id = os.getenv('PAYMENT_SHEET') 
     print(sheet_id)
     sheet = sheetsClient.open_by_key(sheet_id)
     print("Successfully opened the sheet")
@@ -48,19 +50,29 @@ def pullSheet():
         lowerList.append(person.lower())
 
     print("Successfully obtained values")
-    return lowerList
+    return lowerList #returns list of members who have filled out the Google Form
     
 
 
 @bot.event
 async def on_ready():
+    print("Creating dictionary")
+        #create dictionary of all users in the server
+
+    guild = bot.get_guild(1026911592106963084)
+    global members
+    members = {}
+
+    for member in guild.members:
+        members.update({hash(member):member})
+
     print(f"We have logged in as {bot.user}") #write to terminal when bot is ready
 
 #watch for reactions on a message
 
 mechanicRole = "Mechanic"
 discordClient = discord.Client(intents=intents)
-messageID = "1411892429409226802"
+messageID = "1411892429409226802" #must be updated every year
 
 
 @bot.event
@@ -91,8 +103,8 @@ async def on_raw_reaction_add(payload):
 async def verifyRoles(ctx):
     await ctx.send(f"Verifying roles...")
 
-    messageID = "1411892429409226802"
-    channelID = "1026915074377519175"
+    messageID = "1411892429409226802" #needs to be updated every year
+    channelID = "1026915074377519175" #remains the same year-to-year
 
     channel = ctx.guild.get_channel(int(channelID))
 
