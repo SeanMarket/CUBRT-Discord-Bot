@@ -6,6 +6,7 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 from dataclasses import dataclass
+from time import sleep
 
 
 
@@ -35,109 +36,94 @@ bot = commands.Bot(command_prefix='$', intents=intents)
 #-----------Payment-----------#
 MEMBERCOL = 5
 
-def pullSheet():#Refresh the sheet every time there is a new reaction
-    #TODO Overhaul logic to use hashmap instead of nested for loops
-    #TODO Make sheet not dependent on reacting to a message
-    sheet_id = os.getenv('PAYMENT_SHEET') 
-    print(sheet_id)
-    sheet = sheetsClient.open_by_key(sheet_id)
+def pullSheet() -> dict:#Refresh the sheet every time there is a new reaction
+    sheetId = os.getenv('PAYMENT_SHEET')
+    print(sheetId)
+    sheet = sheetsClient.open_by_key(sheetId)
     print("Successfully opened the sheet")
-    values_list = sheet.sheet1.col_values(MEMBERCOL)
+    valuesList = sheet.sheet1.col_values(MEMBERCOL)
 
 
-    lowerList = []
-    for person in values_list: #convert to lowercase to avoid capitalization errors
-        lowerList.append(person.lower())
+    lowerList = {}
+    for person in valuesList: #convert to lowercase to avoid capitalization errors
+        lowerList.update({hash(person):person.lower()})
 
     print("Successfully obtained values")
     return lowerList #returns list of members who have filled out the Google Form
     
 
+guildID = os.getenv('GUILD')
 
 @bot.event
 async def on_ready():
     print("Creating dictionary")
         #create dictionary of all users in the server
 
-    guild = bot.get_guild(1026911592106963084)
+    guild = bot.get_guild(int(os.getenv('GUILD')))
     global members
     members = {}
 
     for member in guild.members:
-        members.update({hash(member):member})
+        members.update({hash(member.name):member})
+        
+
+    #TODO add driver sheet init
 
     print(f"We have logged in as {bot.user}") #write to terminal when bot is ready
 
-#watch for reactions on a message
 
 mechanicRole = "Mechanic"
 discordClient = discord.Client(intents=intents)
-messageID = "1411892429409226802" #must be updated every year
+messageID = int(os.getenv('MESSAGE_ID')) #must be updated every year
 
+#watch for reactions on a message
 
-@bot.event
-async def on_raw_reaction_add(payload):
+# @bot.event
+# async def on_raw_reaction_add(payload):
 
-    guild = bot.get_guild(payload.guild_id) #Get the ID of the message that was reacted to
-    role = discord.utils.get(guild.roles, name=mechanicRole) #find the Mechanic role
-    member = guild.get_member(payload.user_id) #get the user who reacted
+#     global members
 
-    # memberName = (member.name).lower convert to lowercase to avoid capitalization errors
+#     guild = bot.get_guild(payload.guild_id) #Get the ID of the message that was reacted to
+#     role = discord.utils.get(guild.roles, name=mechanicRole) #find the Mechanic role
+#     member = guild.get_member(payload.user_id) #get the user who reacted
 
-    print(member.name + ':')
+#     print(member.name + ':')
 
-    payloadMID = str(payload.message_id)
+#     payloadMID = str(payload.message_id)
 
-    if(payloadMID == messageID):
-        memberList = pullSheet()
-        
+#     if(payloadMID == str(messageID)):
+#         sheetList = pullSheet()
+#         userHash = hash(member.name)
 
-        for person in memberList:
-            print(person)
-            if person == member.name.lower():
-                await member.add_roles(role) #horrible time complexity, but I don't feel like creating a data structure
-    else:
-        return
+#         if(members.get(userHash) and sheetList.get(userHash)): #If username is both on the sheet and in the server
+#             await member.add_roles(role)
+
+#     else:
+#         return
 
 @bot.command()
 async def verifyRoles(ctx):
+    global members
+
     await ctx.send(f"Verifying roles...")
 
-    messageID = "1411892429409226802" #needs to be updated every year
-    channelID = "1026915074377519175" #remains the same year-to-year
-
-    channel = ctx.guild.get_channel(int(channelID))
-
-    message =  await channel.fetch_message(int(messageID))
-
-    # await ctx.send(message)
-
-    users = []
-
-    for reaction in message.reactions:
-        async for user in reaction.users():
-            users.append(user.name)
-
-    #have to convert usernames into member objects. Member objects contain user IDs which are needed to add roles.
-    members = []
-
-    for member in ctx.guild.members:
-        for user in users:
-            if user == member.name.lower():
-                members.append(member)
-
-
-
-
     role = discord.utils.get(ctx.guild.roles, name=mechanicRole)
-    memberList = pullSheet()
-  
-    for member in memberList: #memberList is a list of lowercase names
-        for person in members: #members is a list of member objects
-            print(person.name.lower())
-            if person.name.lower() == member:
-                await person.add_roles(role) #horrible time complexity, but I don't feel like creating a data structure
+    sheetEntries = pullSheet()
 
+    for key in sheetEntries: #Compares the names on the sheet to the names of people in the server, rather than comparing users who reacted to the message to users in the server.
+        if members.get(key):
+            person = members.get(key)
+            await person.add_roles(role)
+        
+    
+    print("All roles verified")
+
+
+@bot.command() #This loop removes the need to watch for reactions to the member dues message. Instead, the bot will execute verifyRoles once an hour. This is useful for initial member dues collection, when there are many form submissions in a short period of time.
+async def idleAssign(ctx):
+    while True:
+        sleep(3600)
+        await verifyRoles(ctx)
 
 #-----------Driver Sheet-----------#
 
@@ -156,9 +142,9 @@ def pullDriverSheet() -> None:#Call this with every sheet update so the bot can 
     global worksheet
     global row
 
-    sheet_id = os.getenv('DRIVER_SHEET') 
-    print(sheet_id)
-    driverSheet = sheetsClient.open_by_key(sheet_id)
+    sheetId = os.getenv('DRIVER_SHEET') 
+    print(sheetId)
+    driverSheet = sheetsClient.open_by_key(sheetId)
     worksheet = driverSheet.get_worksheet(0)
     print("Successfully opened driver sheet")
 
