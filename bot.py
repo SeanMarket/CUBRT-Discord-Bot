@@ -6,7 +6,10 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 from dataclasses import dataclass
-from time import sleep
+import time
+from commands import *
+import timeit
+
 
 
 
@@ -17,6 +20,8 @@ scopes = [
 
 creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
 sheetsClient = gspread.authorize(creds)
+
+SHEET_ID = os.getenv('PAYMENT_SHEET')
 
 
 
@@ -30,99 +35,87 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.presences = True
-bot = commands.Bot(command_prefix='$', intents=intents) 
-
+bot = commands.Bot(command_prefix='$', intents=intents)
 
 #-----------Payment-----------#
 MEMBERCOL = 5
 
-def pullSheet() -> dict:#Refresh the sheet every time there is a new reaction
-    sheetId = os.getenv('PAYMENT_SHEET')
-    print(sheetId)
-    sheet = sheetsClient.open_by_key(sheetId)
+def pullSheet() -> dict:#returns list of members who have filled out the Google Form
+    print("Sheet id: " + SHEET_ID)
+    sheet = sheetsClient.open_by_key(SHEET_ID)
     print("Successfully opened the sheet")
     valuesList = sheet.sheet1.col_values(MEMBERCOL)
 
-
+    #TODO Find capitalization bug and fix it
     lowerList = {}
-    for person in valuesList: #convert to lowercase to avoid capitalization errors
-        lowerList.update({hash(person):person.lower()})
+    print("Creating lowerList")
+    for person in valuesList:
+        lowerList.update({hash(person.lower()):person.lower()})
 
-    print("Successfully obtained values")
-    return lowerList #returns list of members who have filled out the Google Form
+    #TODO look at difference in number of entries in the sheet and compare to entries in lowerList. If different, add the difference. Much more efficient than pulling the entire sheet every refresh.
+
+    print("Successfully obtained lowerlist")
+    return lowerList 
     
 
-guildID = os.getenv('GUILD')
 
 @bot.event
 async def on_ready():
-    print("Creating dictionary")
-        #create dictionary of all users in the server
+    print(f"We have logged in as {bot.user}")
+    print(f"Creating dictionary")
 
     guild = bot.get_guild(int(os.getenv('GUILD')))
     global members
     members = {}
 
     for member in guild.members:
-        members.update({hash(member.name):member})
+        members.update({hash(member.name.lower()):member})
+
+    print(f"Dictionary created")
+    print(f"Bot awaiting commands")
         
 
     #TODO add driver sheet init
 
-    print(f"We have logged in as {bot.user}") #write to terminal when bot is ready
 
 
-mechanicRole = "Mechanic"
-discordClient = discord.Client(intents=intents)
-messageID = int(os.getenv('MESSAGE_ID')) #must be updated every year
-
-#watch for reactions on a message
-
-# @bot.event
-# async def on_raw_reaction_add(payload):
-
-#     global members
-
-#     guild = bot.get_guild(payload.guild_id) #Get the ID of the message that was reacted to
-#     role = discord.utils.get(guild.roles, name=mechanicRole) #find the Mechanic role
-#     member = guild.get_member(payload.user_id) #get the user who reacted
-
-#     print(member.name + ':')
-
-#     payloadMID = str(payload.message_id)
-
-#     if(payloadMID == str(messageID)):
-#         sheetList = pullSheet()
-#         userHash = hash(member.name)
-
-#         if(members.get(userHash) and sheetList.get(userHash)): #If username is both on the sheet and in the server
-#             await member.add_roles(role)
-
-#     else:
-#         return
+MECHANIC_ROLE = "Mechanic"
+DISCORD_CLIENT = discord.Client(intents=intents)
+MESSAGE_ID = int(os.getenv('MESSAGE_ID')) #TODO update every year
 
 @bot.command()
 async def verifyRoles(ctx):
     global members
+    
 
-    await ctx.send(f"Verifying roles...")
+    await ctx.send("Verifying roles...")
+    print("Verifying roles...")
 
-    role = discord.utils.get(ctx.guild.roles, name=mechanicRole)
+    role = discord.utils.get(ctx.guild.roles, name=MECHANIC_ROLE)
     sheetEntries = pullSheet()
 
+    print("Checking sheet against members")
+
+    # startVerification = time.perf_counter()
     for key in sheetEntries: #Compares the names on the sheet to the names of people in the server, rather than comparing users who reacted to the message to users in the server.
+        # print(f"Verifying roles for {current - start:0.4f} seconds")
+        print(members.get(key))
         if members.get(key):
-            person = members.get(key)
-            await person.add_roles(role)
+            # startAssign = time.perf_counter()
+            await members.get(key).add_roles(role)
+            # endAssign = time.perf_counter() 
+            # print("Time for assignment: " + str(endAssign-startAssign))
+            #Not too sure about how much more efficient this can be made. Discord rate limiting greatly impacts performance
         
-    
+    # endVerification = time.perf_counter()
+    # print("Total verification time: " + str(endVerification - startVerification))
     print("All roles verified")
 
 
 @bot.command() #This loop removes the need to watch for reactions to the member dues message. Instead, the bot will execute verifyRoles once an hour. This is useful for initial member dues collection, when there are many form submissions in a short period of time.
 async def idleAssign(ctx):
     while True:
-        sleep(3600)
+        time.sleep(3600)
         await verifyRoles(ctx)
 
 #-----------Driver Sheet-----------#
@@ -133,8 +126,11 @@ class Person:
     rowNum: int
 
 
+FIRST_ROW = 2
+DRIVER_WORKSHEET = 0
+
 drivers = {}
-row = int(2) #init to 2 because first row is headers. Is equal to next free row
+row = int(FIRST_ROW) #init to 2 because first row is headers. Is equal to next free row
 worksheet = None
 
 
@@ -145,7 +141,7 @@ def pullDriverSheet() -> None:#Call this with every sheet update so the bot can 
     sheetId = os.getenv('DRIVER_SHEET') 
     print(sheetId)
     driverSheet = sheetsClient.open_by_key(sheetId)
-    worksheet = driverSheet.get_worksheet(0)
+    worksheet = driverSheet.get_worksheet(DRIVER_WORKSHEET)
     print("Successfully opened driver sheet")
 
     driver_list = driverSheet.sheet1.col_values(1)
@@ -393,5 +389,69 @@ async def addNotes(ctx, first:str, last:str)->None: #bypass all timing informati
         worksheet.update_cell(HEADERROW, emptyCol + 1, "Notes")
     
     worksheet.update_cell(driverRow, emptyCol + 1, notes)
+
+    
+   
+#-----------Personal Commands-----------#
+@bot.command()
+async def hello(ctx):
+    await helloFunc(ctx)
+
+@bot.command()
+async def jake(ctx): 
+    await jakeFunc(ctx)
+
+@bot.command()     
+async def verifyHoles(ctx):
+    await verifyHolesFunc(ctx)
+
+@bot.command()
+async def freakybob(ctx):
+    await freakyBobFunc(ctx)
+
+@bot.command()
+async def carson(ctx):
+    await carsonFunc(ctx)
+
+@bot.command()
+async def sean(ctx):
+    await seanFunc(ctx)
+
+@bot.command()
+async def tripp(ctx):
+    await trippFunc(ctx)
+
+@bot.command()
+async def mike(ctx):
+    await mikeFunc(ctx)
+
+@bot.command()
+async def austin(ctx):
+    await austinFunc(ctx)    
+
+@bot.command()
+async def dom(ctx):
+    await domFunc(ctx)
+
+@bot.command()
+async def chazbo(ctx):
+    await chazboFunc(ctx)
+
+@bot.command()
+async def tobias(ctx):
+    await tobiasFunc(ctx)
+
+@bot.command()
+async def kai(ctx):
+    await kaiFunc(ctx)
+
+@bot.command()
+async def liam(ctx):
+    await liamFunc(ctx)
+
+@bot.command()
+async def tanner(ctx):
+    await tannerFunc(ctx)
+
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
